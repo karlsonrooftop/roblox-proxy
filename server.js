@@ -14,57 +14,63 @@ app.get("/item", async (req, res) => {
   }
 
   try {
-    // Basic details from Roblox
-    const detailsRes = await fetch(`https://economy.roblox.com/v2/assets/${id}/details`, { headers: HEADERS });
-    if (!detailsRes.ok) throw new Error("Failed to fetch asset details: " + detailsRes.status);
-    const details = await detailsRes.json();
-
-    const isLimited = details.IsLimited ?? false;
-    const isLimitedUnique = details.IsLimitedUnique ?? false;
-
     let rap = null;
     let bestPrice = null;
     let remaining = null;
 
-    if (isLimited || isLimitedUnique) {
-      // RAP from Rolimons
-      try {
-        const roliRes = await fetch(`https://www.rolimons.com/itemapi/itemdetails/${id}`, { headers: HEADERS });
-        const roliText = await roliRes.text();
-        console.log("Rolimons response:", roliText.substring(0, 200));
-        const roliData = JSON.parse(roliText);
+    // RAP + value from Rolimons (public API, works fine)
+    try {
+      const roliRes = await fetch(`https://www.rolimons.com/itemapi/itemdetails/${id}`, { headers: HEADERS });
+      if (roliRes.ok) {
+        const roliData = await roliRes.json();
+        console.log("Rolimons data:", JSON.stringify(roliData).substring(0, 300));
         if (roliData.success) {
           rap = roliData.rap > 0 ? roliData.rap : null;
         }
-      } catch (e) {
-        console.log("Rolimons error:", e.message);
+      } else {
+        console.log("Rolimons status:", roliRes.status);
       }
-
-      // Best price from resellers
-      try {
-        const resellRes = await fetch(
-          `https://economy.roblox.com/v1/assets/${id}/resellers?limit=1&sortOrder=Asc`,
-          { headers: HEADERS }
-        );
-        const resellText = await resellRes.text();
-        console.log("Resellers response:", resellText.substring(0, 200));
-        const resellData = JSON.parse(resellText);
-        if (resellData.data && resellData.data.length > 0) {
-          bestPrice = resellData.data[0].price ?? null;
-        }
-      } catch (e) {
-        console.log("Resellers error:", e.message);
-      }
-
-      // Remaining stock
-      try {
-        const resaleRes = await fetch(`https://economy.roblox.com/v1/assets/${id}/resale-data`, { headers: HEADERS });
-        const resaleData = await resaleRes.json();
-        remaining = resaleData.numberRemaining ?? null;
-      } catch (e) {
-        console.log("Resale error:", e.message);
-      }
+    } catch (e) {
+      console.log("Rolimons error:", e.message);
     }
+
+    // Best price + remaining from catalog (not economy, less likely to be blocked)
+    try {
+      const catalogRes = await fetch(
+        `https://catalog.roblox.com/v1/catalog/items/details`,
+        {
+          method: "POST",
+          headers: { ...HEADERS, "Content-Type": "application/json" },
+          body: JSON.stringify({ items: [{ itemType: "Asset", id: parseInt(id) }] })
+        }
+      );
+      if (catalogRes.ok) {
+        const catalogData = await catalogRes.json();
+        console.log("Catalog data:", JSON.stringify(catalogData).substring(0, 300));
+        const item = catalogData?.data?.[0];
+        if (item) {
+          bestPrice = item.lowestPrice ?? item.price ?? null;
+          remaining = item.remainingStock ?? null;
+          // Use catalog RAP if Rolimons didn't give us one
+          if (!rap && item.recentAveragePrice) {
+            rap = item.recentAveragePrice;
+          }
+        }
+      } else {
+        console.log("Catalog status:", catalogRes.status);
+      }
+    } catch (e) {
+      console.log("Catalog error:", e.message);
+    }
+
+    // Basic details (name, price, limited) — this endpoint works
+    const detailsRes = await fetch(`https://economy.roblox.com/v2/assets/${id}/details`, { headers: HEADERS });
+    if (!detailsRes.ok) throw new Error("Details failed: " + detailsRes.status);
+    const details = await detailsRes.json();
+    console.log("Details:", JSON.stringify(details).substring(0, 300));
+
+    const isLimited = details.IsLimited ?? false;
+    const isLimitedUnique = details.IsLimitedUnique ?? false;
 
     return res.json({
       id: details.AssetId,
@@ -77,7 +83,7 @@ app.get("/item", async (req, res) => {
       remaining,
     });
   } catch (err) {
-    console.error(err);
+    console.error("Fatal error:", err.message);
     return res.status(500).json({ error: err.message });
   }
 });
