@@ -2,6 +2,11 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept": "application/json",
+};
+
 app.get("/item", async (req, res) => {
   const id = req.query.id;
   if (!id || isNaN(id)) {
@@ -9,9 +14,9 @@ app.get("/item", async (req, res) => {
   }
 
   try {
-    // Get basic info (name, price, limited status) from Roblox MarketplaceService equivalent
-    const detailsRes = await fetch(`https://economy.roblox.com/v2/assets/${id}/details`);
-    if (!detailsRes.ok) throw new Error("Failed to fetch asset details");
+    // Basic details from Roblox
+    const detailsRes = await fetch(`https://economy.roblox.com/v2/assets/${id}/details`, { headers: HEADERS });
+    if (!detailsRes.ok) throw new Error("Failed to fetch asset details: " + detailsRes.status);
     const details = await detailsRes.json();
 
     const isLimited = details.IsLimited ?? false;
@@ -22,31 +27,42 @@ app.get("/item", async (req, res) => {
     let remaining = null;
 
     if (isLimited || isLimitedUnique) {
-      // Get RAP from Rolimons (accurate, works for all limiteds including new system)
-      const roliRes = await fetch(`https://www.rolimons.com/itemapi/itemdetails/${id}`);
-      if (roliRes.ok) {
-        const roliData = await roliRes.json();
-        if (roliData.success && roliData.item_id) {
+      // RAP from Rolimons
+      try {
+        const roliRes = await fetch(`https://www.rolimons.com/itemapi/itemdetails/${id}`, { headers: HEADERS });
+        const roliText = await roliRes.text();
+        console.log("Rolimons response:", roliText.substring(0, 200));
+        const roliData = JSON.parse(roliText);
+        if (roliData.success) {
           rap = roliData.rap > 0 ? roliData.rap : null;
         }
+      } catch (e) {
+        console.log("Rolimons error:", e.message);
       }
 
-      // Get best price (lowest reseller) from Roblox
-      const resellRes = await fetch(
-        `https://economy.roblox.com/v1/assets/${id}/resellers?limit=1&sortOrder=Asc`
-      );
-      if (resellRes.ok) {
-        const resellData = await resellRes.json();
+      // Best price from resellers
+      try {
+        const resellRes = await fetch(
+          `https://economy.roblox.com/v1/assets/${id}/resellers?limit=1&sortOrder=Asc`,
+          { headers: HEADERS }
+        );
+        const resellText = await resellRes.text();
+        console.log("Resellers response:", resellText.substring(0, 200));
+        const resellData = JSON.parse(resellText);
         if (resellData.data && resellData.data.length > 0) {
           bestPrice = resellData.data[0].price ?? null;
         }
+      } catch (e) {
+        console.log("Resellers error:", e.message);
       }
 
-      // Get remaining stock
-      const resaleRes = await fetch(`https://economy.roblox.com/v1/assets/${id}/resale-data`);
-      if (resaleRes.ok) {
+      // Remaining stock
+      try {
+        const resaleRes = await fetch(`https://economy.roblox.com/v1/assets/${id}/resale-data`, { headers: HEADERS });
         const resaleData = await resaleRes.json();
         remaining = resaleData.numberRemaining ?? null;
+      } catch (e) {
+        console.log("Resale error:", e.message);
       }
     }
 
