@@ -9,32 +9,34 @@ app.get("/item", async (req, res) => {
   }
 
   try {
-    // Fetch basic item details (name, price, limited status)
+    // Fetch basic item details
     const detailsRes = await fetch(
       `https://economy.roblox.com/v2/assets/${id}/details`
     );
     if (!detailsRes.ok) throw new Error("Failed to fetch asset details");
     const details = await detailsRes.json();
 
-    // Fetch RAP and sales data from economy API
+    const isLimited = details.IsLimited ?? false;
+    const isLimitedUnique = details.IsLimitedUnique ?? false;
+
     let rap = null;
-    let sales = null;
-    if (details.IsLimited || details.IsLimitedUnique) {
+    let bestPrice = null;
+    let remaining = null;
+
+    if (isLimited || isLimitedUnique) {
+      // RAP from resale data
       const rapRes = await fetch(
         `https://economy.roblox.com/v1/assets/${id}/resale-data`
       );
       if (rapRes.ok) {
         const rapData = await rapRes.json();
         rap = rapData.recentAveragePrice ?? null;
-        sales = rapData.numberRemaining ?? null;
+        remaining = rapData.numberRemaining ?? null;
       }
-    }
 
-    // Fetch lowest reseller price (best price)
-    let bestPrice = null;
-    if (details.IsLimited || details.IsLimitedUnique) {
+      // Best price (lowest reseller)
       const resellRes = await fetch(
-        `https://economy.roblox.com/v1/assets/${id}/resellers?limit=1`
+        `https://economy.roblox.com/v1/assets/${id}/resellers?limit=1&cursor=&sortOrder=Asc`
       );
       if (resellRes.ok) {
         const resellData = await resellRes.json();
@@ -48,11 +50,11 @@ app.get("/item", async (req, res) => {
       id: details.AssetId,
       name: details.Name,
       price: details.PriceInRobux ?? 0,
-      isLimited: details.IsLimited ?? false,
-      isLimitedUnique: details.IsLimitedUnique ?? false,
-      rap: rap,
-      bestPrice: bestPrice,
-      remaining: sales,
+      isLimited,
+      isLimitedUnique,
+      rap,
+      bestPrice,
+      remaining,
     });
   } catch (err) {
     console.error(err);
